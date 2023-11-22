@@ -214,8 +214,11 @@ class Decoder(nn.Module):
         # Global context feature aggregation module.
         self.bam = BAM(1024)
         self.db1 = nn.Sequential(
+            # 1*1卷积
             nn.Conv2d(1024, 512, 1), nn.BatchNorm2d(512), nn.ReLU(),
+            # 深度可分离卷积
             DWConv(512, 512),
+            # todo 通道注意力
             nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
         )
 
