@@ -21,6 +21,7 @@ class zh_net(nn.Module):
         # 此处用的同一个encoder来共享权重
         output1 = self.encoder(A)
         output2 = self.encoder(B)
+        # 解码块
         result = self.decoder(output1, output2)
         return result
 
@@ -70,7 +71,8 @@ class BasicBlock(nn.Module):
 
         return out
 
-
+# 解释一下这段代码的作用
+#
 class ResNet(nn.Module):
     def __init__(self, block, layers):
         #
@@ -208,6 +210,8 @@ class Decoder(nn.Module):
     def __init__(self):
         super(Decoder, self).__init__()
         # todo 1024 = encoder（A）+ encoder（B）???
+        # BAM is used to fuse the features of two images
+        # Global context feature aggregation module.
         self.bam = BAM(1024)
         self.db1 = nn.Sequential(
             nn.Conv2d(1024, 512, 1), nn.BatchNorm2d(512), nn.ReLU(),
@@ -233,6 +237,7 @@ class Decoder(nn.Module):
         input1_1, input2_1, input3_1, input4_1, input5_1 = input1[0], input1[1], input1[2], input1[3], input1[4]
         input1_2, input2_2, input3_2, input4_2, input5_2 = input2[0], input2[1], input2[2], input2[3], input2[4]
 
+        # GCFAM之前的特征融合
         x = torch.cat((input5_1, input5_2), dim=1)
         x = self.bam(x)
         x = self.db1(x)
