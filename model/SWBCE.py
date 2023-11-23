@@ -20,3 +20,6 @@ class WeightedBCEWithLogitsLoss(nn.Module):
         loss = F.binary_cross_entropy_with_logits(input, target, weight=weight1, reduction="mean")
 
         return loss
+
+model = WeightedBCEWithLogitsLoss()
+print(model)

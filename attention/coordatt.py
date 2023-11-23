@@ -22,6 +22,7 @@ class h_swish(nn.Module):
         return x * self.sigmoid(x)
 
 
+# CA Coordinate attention
 class CoordAtt(nn.Module):
     def __init__(self, inp, oup, reduction=32):
         super(CoordAtt, self).__init__()
@@ -41,20 +42,29 @@ class CoordAtt(nn.Module):
         identity = x
 
         n, c, h, w = x.size()
+        # X Avg Pooling
         x_h = self.pool_h(x)
+        # Y Avg Pooling + Transpose
         x_w = self.pool_w(x).permute(0, 1, 3, 2)
 
+        # C * (H+W) * 1
         y = torch.cat([x_h, x_w], dim=2)
+        # 1 * 1卷积 -> T = c/r * (h*w) * 1 + BachNorm + ReLU( nn.ReLU6(inplace=inplace) )
         y = self.conv1(y)
         y = self.bn1(y)
         y = self.act(y)
 
+        # Split -> C * H * 1, C * W * 1
         x_h, x_w = torch.split(y, [h, w], dim=2)
+        # Transpose
         x_w = x_w.permute(0, 1, 3, 2)
 
+        # 1 * 1卷积 -> C * H * 1 ->  Z^h
         a_h = self.conv_h(x_h).sigmoid()
+        # 1 * 1卷积 -> C * 1 * w ->  Z^w
         a_w = self.conv_w(x_w).sigmoid()
 
+        # Output Y = X * Z^h * Z^w
         out = identity * a_w * a_h
 
 

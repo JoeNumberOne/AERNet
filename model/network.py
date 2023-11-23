@@ -168,16 +168,26 @@ class decoder_block(nn.Module):
 
         self.de_block4 = nn.Conv2d(out_channels, 1, 1)
 
+        # 上采样
         self.de_block5 = nn.ConvTranspose2d(out_channels, out_channels, kernel_size=2, stride=2)
 
     def forward(self, input1, input, input2):
+        # 将三个输入的特征图进行拼接
         x0 = torch.cat((input1, input, input2), dim=1)
+        # Enhanced Coordinate attention (ECA) Attention decoding block.
+        # 1*1卷积
         x0 = self.de_block1(x0)
+        # todo 可能是DSConv
         x = self.de_block2(x0)
+        # CA Coordinate attention.
         x = self.att(x)
+        # todo 可能是DSConv
         x = self.de_block3(x)
+        # Elemeny-wise sum
         x = x + x0
+        # 1*1卷积 al为Deep Supervision Flow( DS )用于辅助反向传播 todo 图中并没有标注要进行1*1卷积进行通道的变换
         al = self.de_block4(x)
+        # 上采样 result为CDN-#
         result = self.de_block5(x)
 
         return al, result
@@ -186,6 +196,7 @@ class decoder_block(nn.Module):
 class ref_seg(nn.Module):
     def __init__(self):
         super(ref_seg, self).__init__()
+        # this is the damn D method in the paper. but no softmax
         self.dir_head = nn.Sequential(nn.Conv2d(32, 32, 1, 1), nn.BatchNorm2d(32), nn.ReLU(), nn.Conv2d(32, 8, 1, 1))
         self.conv0 = nn.Conv2d(1, 8, 3, 1, 1, bias=False)
         self.conv0.weight = nn.Parameter(torch.tensor([[[[0, 0, 0], [1, 0, 0], [0, 0, 0]]],
@@ -196,11 +207,53 @@ class ref_seg(nn.Module):
                                                        [[[0, 0, 0], [0, 0, 0], [0, 0, 1]]],
                                                        [[[0, 0, 0], [0, 0, 0], [0, 1, 0]]],
                                                        [[[0, 0, 0], [0, 0, 0], [1, 0, 0]]]]).float())
-
+    # (x, S, E)
     def forward(self, x, masks_pred, edge_pred):
+        # this is the damn D method in the paper (Direction Prediction). but no softmax
         direc_pred = self.dir_head(x)
+        # this is the D ,D = ρ(F_classifier2(X))
         direc_pred = direc_pred.softmax(1)
+        # this is the E ,E = σ(F_classifier1(X)) > 0.5
         edge_mask = 1 * (torch.sigmoid(edge_pred).detach() > 0.5)
+        '''
+        x.unsqueeze(dim=a)
+        用途：进行维度扩充，在指定位置加上维数为1的维度
+        
+        参数设置：如果设置dim=a，就是在维度为a的位置进行扩充
+            import torch
+            x = torch.tensor([1,2,3,4])
+            print(x)
+            x1 = x.unsqueeze(dim=0)
+            print(x1)
+            x2 = x.unsqueeze(dim=1)
+            print(x2)
+             
+            y = torch.tensor([[1,2,3,4],[9,8,7,6]])
+            print(y)
+            y1 = y.unsqueeze(dim=0)
+            print(y1)
+            y2 = y.unsqueeze(dim=1)
+            print(y2)
+            
+            
+            output:
+            x: tensor([1, 2, 3, 4])
+            x1: tensor([[1, 2, 3, 4]])
+            x2: tensor([[1],
+                    [2],
+                    [3],
+                    [4]])
+            y: tensor([[1, 2, 3, 4],
+                    [9, 8, 7, 6]])
+            y1: tensor([[[1, 2, 3, 4],
+                     [9, 8, 7, 6]]])
+            y2: tensor([[[1, 2, 3, 4]],
+             
+                    [[9, 8, 7, 6]]])
+        '''
+        # unsqueeze(1)在第二维度上增加一个维度
+        # S 经过一个固定的卷积层 * D ,然后在第一维度相加(Element-wise sum) 然后乘以E，最后加上S*(1-E)
+        # Z = R × E + S × (1 − E).
         refined_mask_pred = (self.conv0(masks_pred) * direc_pred).sum(1).unsqueeze(1) * edge_mask + masks_pred * (
                 1 - edge_mask)
         return refined_mask_pred
@@ -213,23 +266,28 @@ class Decoder(nn.Module):
         # BAM is used to fuse the features of two images
         # Global context feature aggregation module.
         self.bam = BAM(1024)
+
         self.db1 = nn.Sequential(
             # 1*1卷积
             nn.Conv2d(1024, 512, 1), nn.BatchNorm2d(512), nn.ReLU(),
-            # 深度可分离卷积
+            # todo DWConv是什么 图上没有 可能也是它上采样的一部分
             DWConv(512, 512),
-            # todo 通道注意力
+            # ConvTranspose2d是反卷积 上采样
             nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
         )
-
+        # CDN-1
         self.db2 = decoder_block(1024, 256)
+        # CDN-2
         self.db3 = decoder_block(512, 128)
+        # CDN-3
         self.db4 = decoder_block(256, 64)
+        # CDN-4
         self.db5 = decoder_block(192, 32)
 
+        # classifier1 For E but no softmax
         self.classifier1 = nn.Sequential(
             nn.Conv2d(32, 32, 3, 1, 1), nn.BatchNorm2d(32), nn.ReLU(), nn.Conv2d(32, 1, 1))
-
+        # classifier2 For D but no softmax , +1 is because the concat
         self.classifier2 = nn.Sequential(
             nn.Conv2d(32 + 1, 32, 3, 1, 1), nn.BatchNorm2d(32), nn.ReLU(), nn.Conv2d(32, 1, 1))
         self.interpo = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
@@ -242,19 +300,29 @@ class Decoder(nn.Module):
 
         # GCFAM之前的特征融合
         x = torch.cat((input5_1, input5_2), dim=1)
+        # GCFAM
         x = self.bam(x)
         x = self.db1(x)
 
         # 512*16*16
-        al1, x = self.db2(input4_1, x, input4_2)  # 256*32*32
-        al2, x = self.db3(input3_1, x, input3_2)  # 128*64*64
-        al3, x = self.db4(input2_1, x, input2_2)  # 64*128*128
-        al4, x = self.db5(input1_1, x, input1_2)  # 32*256*256
+        # Enhanced Coordinate attention (ECA) Attention decoding block.
+        # CDN-1 256*32*32
+        al1, x = self.db2(input4_1, x, input4_2)
+        # CDN-2 128*64*64
+        al2, x = self.db3(input3_1, x, input3_2)
+        # CDN-3 64*128*128
+        al3, x = self.db4(input2_1, x, input2_2)
+        # CDN-4 32*256*256
+        al4, x = self.db5(input1_1, x, input1_2)
 
+        # Edge refinement module.
+        # edge is referred to E in the paper (Edge Prediction). but no sigmoid
         edge = self.classifier1(x)
+        # DS4 and x concat, this classifier is the classifier3 in the paper(Coarse Segmentation). and seg is referred to S in the paper.
         seg = self.classifier2(torch.cat((x, self.interpo(al4)), 1))
+        # the result is Z and refine is Edge refinement module
         result = self.refine(x, seg, edge)
-
+        # DS1, DS2, DS3, DS4, Z, S
         return al1, al2, al3, al4, result, seg
 
     def _init_weight(self):

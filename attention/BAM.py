@@ -25,7 +25,7 @@ class BAM(nn.Module):
 
         self.softmax = nn.Softmax(dim=-1)  #
 
-    def forward(self, input, view=self.key_conv(x).view(m_batchsize, -1, width * height)):
+    def forward(self, input):
         """
             inputs :
                 x : input feature maps( B X C X W X H)
@@ -61,7 +61,7 @@ class BAM(nn.Module):
         proj_query = self.query_conv(x).view(m_batchsize, -1, width * height).permute(0, 2, 1)
         # B X C x (*W*H)/(ds*ds)
         # this proj is K' in the paper
-        proj_key = view
+        proj_key = self.key_conv(x).view(m_batchsize, -1, width * height)
         '''
         transpose check
         torch.bmm(input, mat2, out=None) → Tensor
@@ -92,7 +92,7 @@ class BAM(nn.Module):
             传入的scale_factor将在插值计算中使用。否则，将根据用于插值计算的输出和输入大小计算新的scale_factor（即，如果计算的output_size显式传入，则计算将相同 ）。
             注意当scale_factor 是浮点数，由于舍入和精度问题，重新计算的 scale_factor 可能与传入的不同。
         """
-        # todo 他这里先进行的上采样,再进行的相加 , 并且没有进行1*1卷积
+        # 这里应该是进行的reshape    但用的是上采样的方法 N= width * height
         out = F.interpolate(out, [width * self.ds, height * self.ds])
         out = out + input
 

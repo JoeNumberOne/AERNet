@@ -2,7 +2,7 @@ import torch.nn as nn
 
 
 class DWConv(nn.Module):
-    # 深度可分离卷积
+    # 深度可分离卷积 todo 可能是DSConv ？？？ 需要看看DSConv的定义
     def __init__(self, in_ch, out_ch):
         super(DWConv, self).__init__()
         self.depth_conv = nn.Conv2d(
