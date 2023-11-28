@@ -2,10 +2,13 @@ import math
 import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
+from torch.utils.data import DataLoader
 
 from attention.BAM import BAM
 from attention.coordatt import CoordAtt
 from model.DWConv import DWConv
+from model.MyDataset import MyDataSet
+from model.SWBCE import WeightedBCEWithLogitsLoss
 
 
 class zh_net(nn.Module):
@@ -70,6 +73,7 @@ class BasicBlock(nn.Module):
         out = self.relu(out)
 
         return out
+
 
 # 解释一下这段代码的作用
 #
@@ -207,6 +211,7 @@ class ref_seg(nn.Module):
                                                        [[[0, 0, 0], [0, 0, 0], [0, 0, 1]]],
                                                        [[[0, 0, 0], [0, 0, 0], [0, 1, 0]]],
                                                        [[[0, 0, 0], [0, 0, 0], [1, 0, 0]]]]).float())
+
     # (x, S, E)
     def forward(self, x, masks_pred, edge_pred):
         # this is the damn D method in the paper (Direction Prediction). but no softmax
@@ -334,13 +339,45 @@ class Decoder(nn.Module):
                 m.bias.data.zero_()
 
 
+# if __name__ == '__main__':
+#     test_data1 = torch.rand(2, 3, 256, 256).cuda()
+#     test_data2 = torch.rand(2, 3, 256, 256).cuda()
+#     test_label = torch.randint(0, 2, (2, 1, 256, 256)).cuda()
+#     model = zh_net()
+#     model = model.cuda()
+#     output = model(test_data1, test_data2)
+#     print(output)
+
 if __name__ == '__main__':
-    test_data1 = torch.rand(2, 3, 256, 256).cuda()
-    test_data2 = torch.rand(2, 3, 256, 256).cuda()
-    test_label = torch.randint(0, 2, (2, 1, 256, 256)).cuda()
+    root_dir = "../HRCUS-CD/train"
+    children_dir = "A"
+    my_dataset = MyDataSet(root_dir, children_dir)
+    train_data_size = len(my_dataset)
+    train_data_loader = DataLoader(my_dataset, batch_size=64, shuffle=False, num_workers=0, drop_last=False)
     model = zh_net()
-    model = model.cuda()
-    output = model(test_data1, test_data2)
-    print(output)
+    loss_fun = WeightedBCEWithLogitsLoss()
 
+    learning_rate = 0.01
+    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
+    total_train_step = 0
+    total_test_step = 0
+    epoch = 10
+
+    for i in range(epoch):
+        print("----------------------第 {} 轮训练开始----------------------".format(i + 1))
+
+        model.train()
+        for data in train_data_loader:
+            img_A, img_B, targets = data
+            output = model(img_A, img_B)
+            # print(output[0])
+            # print(output)
+            loss = loss_fun(output[0], targets)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_train_step += 1
+            if total_train_step % 100 == 0:
+                print("训练次数:{},Loss:{}".format(total_train_step, loss.item()))
