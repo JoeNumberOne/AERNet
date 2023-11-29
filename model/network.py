@@ -8,7 +8,7 @@ from attention.BAM import BAM
 from attention.coordatt import CoordAtt
 from model.DWConv import DWConv
 from model.MyDataset import MyDataSet
-from model.SWBCE import WeightedBCEWithLogitsLoss
+from model.SelfAdaptiveWeightedBCE import SelfAdaptiveWeightedBCE
 
 
 class zh_net(nn.Module):
@@ -346,23 +346,29 @@ class Decoder(nn.Module):
 #     model = zh_net()
 #     model = model.cuda()
 #     output = model(test_data1, test_data2)
-#     print(output)
+#     print(output.shape)
+
+
+# def self_adaptive_weighted_BCE(logits, targets):
+#
+#
+#     return loss.mean()
+
 
 if __name__ == '__main__':
     root_dir = "../HRCUS-CD/train"
     children_dir = "A"
     my_dataset = MyDataSet(root_dir, children_dir)
     train_data_size = len(my_dataset)
-    train_data_loader = DataLoader(my_dataset, batch_size=64, shuffle=False, num_workers=0, drop_last=False)
+    train_data_loader = DataLoader(my_dataset, batch_size=24, shuffle=False, num_workers=2, drop_last=False)
     model = zh_net()
-    loss_fun = WeightedBCEWithLogitsLoss()
-
+    loss_fun = SelfAdaptiveWeightedBCE()
     learning_rate = 0.01
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     total_train_step = 0
     total_test_step = 0
-    epoch = 10
+    epoch = 125
 
     for i in range(epoch):
         print("----------------------第 {} 轮训练开始----------------------".format(i + 1))
@@ -370,14 +376,18 @@ if __name__ == '__main__':
         model.train()
         for data in train_data_loader:
             img_A, img_B, targets = data
-            output = model(img_A, img_B)
-            # print(output[0])
-            # print(output)
-            loss = loss_fun(output[0], targets)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            total_train_step += 1
-            if total_train_step % 100 == 0:
-                print("训练次数:{},Loss:{}".format(total_train_step, loss.item()))
+            print(targets > 0)
+            # output = model(img_A, img_B)
+            # print(targets.shape)
+            # print(output[0].shape)
+            # # print(img_A.shape)
+            # # print(output[0])
+            # # print(output)
+            # loss = loss_fun(output[0], targets)
+            # optimizer.zero_grad()
+            # loss.backward()
+            # optimizer.step()
+            #
+            # total_train_step += 1
+            # if total_train_step % 100 == 0:
+            #     print("训练次数:{},Loss:{}".format(total_train_step, loss.item()))
