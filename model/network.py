@@ -26,12 +26,12 @@ class zh_net(nn.Module):
         output2 = self.encoder(B)
         # 解码块
         result = self.decoder(output1, output2)
-        print("al1:{}".format(result[0].shape))
-        print("al2:{}".format(result[1].shape))
-        print("al3:{}".format(result[2].shape))
-        print("al4:{}".format(result[3].shape))
-        print("result:{}".format(result[4].shape))
-        print("seg:{}".format(result[5].shape))
+        # print("al1:{}".format(result[0].shape))
+        # print("al2:{}".format(result[1].shape))
+        # print("al3:{}".format(result[2].shape))
+        # print("al4:{}".format(result[3].shape))
+        # print("result:{}".format(result[4].shape))
+        # print("seg:{}".format(result[5].shape))
         return result
 
     def freeze_bn(self):
@@ -200,8 +200,8 @@ class decoder_block(nn.Module):
         al = self.de_block4(x)
         # 上采样
         result = self.de_block5(x)
-        print("al:{}".format(al.shape))
-        print("result:{}".format(result.shape))
+        # print("al:{}".format(al.shape))
+        # print("result:{}".format(result.shape))
 
         return al, result
 
@@ -375,19 +375,32 @@ class ManageAltoDS(nn.Module):
         # al4:torch.Size([24, 1, 128, 128])
         # result:torch.Size([24, 1, 256, 256])
         # seg:torch.Size([24, 1, 256, 256])
-        self.conv1 = nn.Conv2d(16, 256, 1)
-        self.conv2 = nn.Conv2d(32, 256, 1)
-        self.conv3 = nn.Conv2d(64, 256, 1)
-        self.conv4 = nn.Conv2d(128, 256, 1)
+
+        self.conv1 = nn.Conv2d(1, 1, 1)
+        self.conv2 = nn.Conv2d(1, 1, 1)
+        self.conv3 = nn.Conv2d(1, 1, 1)
+        self.conv4 = nn.Conv2d(1, 1, 1)
 
     def forward(self, output):
         # 用来处理al(ADBi) 1-4 生成 DS 1-4 用于辅助反向传播
         al1, al2, al3, al4, result, seg = output
-        print("al1:{}".format(al1.shape))
-        al1 = self.sigmoid(self.conv1(al1))
-        al2 = self.sigmoid(self.conv2(al2))
-        al3 = self.sigmoid(self.conv3(al3))
-        al4 = self.sigmoid(self.conv4(al4))
+        # 将al1 从 16*16 转置卷积到 256*256
+        al1 = nn.Upsample(scale_factor=16, mode='bilinear', align_corners=True)(al1)
+        # 将al2 从 32*32 转置卷积到 256*256
+        al2 = nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True)(al2)
+        # 将al2 从 64*64 转置卷积到 256*256
+        al3 = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True)(al3)
+        # 将al2 从 128*128 转置卷积到 256*256
+        al4 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)(al4)
+        # print("al1:{}".format(al1.shape))
+        # print("al2:{}".format(al2.shape))
+        # print("al3:{}".format(al3.shape))
+        # print("al4:{}".format(al4.shape))
+
+        # al1 = self.sigmoid(self.conv1(al1))
+        # al2 = self.sigmoid(self.conv2(al2))
+        # al3 = self.sigmoid(self.conv3(al3))
+        # al4 = self.sigmoid(self.conv4(al4))
         return al1, al2, al3, al4, result, seg
 
 
