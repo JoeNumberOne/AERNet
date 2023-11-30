@@ -200,6 +200,8 @@ class decoder_block(nn.Module):
         al = self.de_block4(x)
         # 上采样
         result = self.de_block5(x)
+        print("al:{}".format(al.shape))
+        print("result:{}".format(result.shape))
 
         return al, result
 
@@ -381,6 +383,7 @@ class ManageAltoDS(nn.Module):
     def forward(self, output):
         # 用来处理al(ADBi) 1-4 生成 DS 1-4 用于辅助反向传播
         al1, al2, al3, al4, result, seg = output
+        print("al1:{}".format(al1.shape))
         al1 = self.sigmoid(self.conv1(al1))
         al2 = self.sigmoid(self.conv2(al2))
         al3 = self.sigmoid(self.conv3(al3))
@@ -428,4 +431,4 @@ if __name__ == '__main__':
 
             total_train_step += 1
             if total_train_step % 100 == 0:
-                print("训练次数:{},Loss:{}".format(total_train_step, loss.item()))
+                print("训练次数:{},Loss:{}".format(total_train_step, lossTotal.item()))

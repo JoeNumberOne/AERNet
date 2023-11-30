@@ -15,7 +15,7 @@ class SelfAdaptiveWeightedBCE(nn.Module):
         super(SelfAdaptiveWeightedBCE, self).__init__()
 
     def forward(self, inputs, targets):
-        print("inputs:{}".format(inputs.shape))
+        # print("inputs:{}".format(inputs.shape))
         pred = torch.where(torch.sigmoid(inputs) > 0.5, 1, 0)
         w1, w2 = loss_weight(pred, targets)
         weight1 = torch.zeros_like(targets)
@@ -33,8 +33,8 @@ class SelfAdaptiveWeightedBCE(nn.Module):
 def loss_weight(pred, targets):
     # TP是准确识别出变化像素的数量，FP是未变化像素被错误检测为变化像素的数量。 TN表示正确检测到的未变化像素的数量，FN表示被错误识别为未变化像素的变化像素的数量。(变化为1,未变为0)
     # 1.计算TP、FP、TN、FN
-    print("pred:{}".format(pred.shape))
-    print("targets:{}".format(targets.shape))
+    # print("pred:{}".format(pred.shape))
+    # print("targets:{}".format(targets.shape))
     # pred:torch.Size([24, 1, 16, 16])
     # targets:torch.Size([24, 1, 256, 256])
     TP = torch.sum(targets * pred)
