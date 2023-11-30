@@ -26,6 +26,12 @@ class zh_net(nn.Module):
         output2 = self.encoder(B)
         # 解码块
         result = self.decoder(output1, output2)
+        print("al1:{}".format(result[0].shape))
+        print("al2:{}".format(result[1].shape))
+        print("al3:{}".format(result[2].shape))
+        print("al4:{}".format(result[3].shape))
+        print("result:{}".format(result[4].shape))
+        print("seg:{}".format(result[5].shape))
         return result
 
     def freeze_bn(self):
@@ -189,9 +195,10 @@ class decoder_block(nn.Module):
         x = self.de_block3(x)
         # Elemeny-wise sum
         x = x + x0
-        # 1*1卷积 al为Deep Supervision Flow( DS )用于辅助反向传播 todo 图中并没有标注要进行1*1卷积进行通道的变换
+        # 1*1卷积 al为Deep Supervision Flow( DS )用于辅助反向传播
+        #  todo 图中并没有标注要进行1*1卷积进行通道的变换,
         al = self.de_block4(x)
-        # 上采样 result为CDN-#
+        # 上采样
         result = self.de_block5(x)
 
         return al, result
@@ -327,7 +334,7 @@ class Decoder(nn.Module):
         seg = self.classifier2(torch.cat((x, self.interpo(al4)), 1))
         # the result is Z and refine is Edge refinement module
         result = self.refine(x, seg, edge)
-        # DS1, DS2, DS3, DS4, Z, S
+        # ADB1, ADB2, ADB3, ADB4, Z, S
         return al1, al2, al3, al4, result, seg
 
     def _init_weight(self):
@@ -349,10 +356,36 @@ class Decoder(nn.Module):
 #     print(output.shape)
 
 
-# def self_adaptive_weighted_BCE(logits, targets):
+# def manageAltoDS(output):
+#     # 用来处理al(ADBi) 1-4 生成 DS 1-4 用于辅助反向传播
+#     al1, al2, al3, al4, result, seg = output
 #
-#
-#     return loss.mean()
+#     pass
+
+class ManageAltoDS(nn.Module):
+
+    def __init__(self):
+        super(ManageAltoDS, self).__init__()
+        self.sigmoid = nn.Sigmoid()
+        # al1:torch.Size([24, 1, 16, 16])
+        # al2:torch.Size([24, 1, 32, 32])
+        # al3:torch.Size([24, 1, 64, 64])
+        # al4:torch.Size([24, 1, 128, 128])
+        # result:torch.Size([24, 1, 256, 256])
+        # seg:torch.Size([24, 1, 256, 256])
+        self.conv1 = nn.Conv2d(16, 256, 1)
+        self.conv2 = nn.Conv2d(32, 256, 1)
+        self.conv3 = nn.Conv2d(64, 256, 1)
+        self.conv4 = nn.Conv2d(128, 256, 1)
+
+    def forward(self, output):
+        # 用来处理al(ADBi) 1-4 生成 DS 1-4 用于辅助反向传播
+        al1, al2, al3, al4, result, seg = output
+        al1 = self.sigmoid(self.conv1(al1))
+        al2 = self.sigmoid(self.conv2(al2))
+        al3 = self.sigmoid(self.conv3(al3))
+        al4 = self.sigmoid(self.conv4(al4))
+        return al1, al2, al3, al4, result, seg
 
 
 if __name__ == '__main__':
@@ -362,9 +395,9 @@ if __name__ == '__main__':
     train_data_size = len(my_dataset)
     train_data_loader = DataLoader(my_dataset, batch_size=24, shuffle=False, num_workers=2, drop_last=False)
     model = zh_net()
+    manageAltoDS = ManageAltoDS()
     loss_fun = SelfAdaptiveWeightedBCE()
-    learning_rate = 0.01
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=5e-4)
 
     total_train_step = 0
     total_test_step = 0
@@ -376,18 +409,23 @@ if __name__ == '__main__':
         model.train()
         for data in train_data_loader:
             img_A, img_B, targets = data
-            print(targets > 0)
-            # output = model(img_A, img_B)
-            # print(targets.shape)
-            # print(output[0].shape)
-            # # print(img_A.shape)
-            # # print(output[0])
-            # # print(output)
-            # loss = loss_fun(output[0], targets)
-            # optimizer.zero_grad()
-            # loss.backward()
-            # optimizer.step()
-            #
-            # total_train_step += 1
-            # if total_train_step % 100 == 0:
-            #     print("训练次数:{},Loss:{}".format(total_train_step, loss.item()))
+            output = model(img_A, img_B)
+            # 用来处理al(ADBi) 1-4 生成 DS 1-4 用于辅助反向传播
+            output = manageAltoDS(output)
+            al1, al2, al3, al4, result, seg = output
+            # 计算loss1 loss2 loss3 loss4 loss5(result) lossTotal
+            loss1 = loss_fun(al1, targets)
+            loss2 = loss_fun(al2, targets)
+            loss3 = loss_fun(al3, targets)
+            loss4 = loss_fun(al4, targets)
+            loss5 = loss_fun(result, targets)
+            lossTotal = loss1 + loss2 + loss3 + loss4 + loss5
+
+            # loss = loss_fun(output, targets)
+            optimizer.zero_grad()
+            lossTotal.backward()
+            optimizer.step()
+
+            total_train_step += 1
+            if total_train_step % 100 == 0:
+                print("训练次数:{},Loss:{}".format(total_train_step, loss.item()))
