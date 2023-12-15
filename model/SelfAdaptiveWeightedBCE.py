@@ -46,6 +46,20 @@ def loss_weight(pred, targets):
     w2 = TP / (TN + FP + FN)
     return w1, w2
 
+def calculate_point(pred, targets):
+    # TP是准确识别出变化像素的数量，FP是未变化像素被错误检测为变化像素的数量。 TN表示正确检测到的未变化像素的数量，FN表示被错误识别为未变化像素的变化像素的数量。(变化为1,未变为0)
+    # 1.计算TP、FP、TN、FN
+    # print("pred:{}".format(pred.shape))
+    # print("targets:{}".format(targets.shape))
+    # pred:torch.Size([24, 1, 16, 16])
+    # targets:torch.Size([24, 1, 256, 256])
+    TP = torch.sum(targets * pred)
+    FP = torch.sum((1 - targets) * pred)
+    TN = torch.sum((1 - targets) * (1 - pred))
+    FN = torch.sum(targets * (1 - pred))  # 变化像素:targets=1,错误识别为未变化像素:pred=0
+
+    return TP, FP, TN, FN
+
 
 if __name__ == '__main__':
     inputs = torch.randn(4, 4)

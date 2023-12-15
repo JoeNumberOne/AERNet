@@ -8,7 +8,7 @@ from attention.BAM import BAM
 from attention.coordatt import CoordAtt
 from model.DWConv import DWConv
 from model.MyDataset import MyDataSet
-from model.SelfAdaptiveWeightedBCE import SelfAdaptiveWeightedBCE
+from model.SelfAdaptiveWeightedBCE import SelfAdaptiveWeightedBCE, calculate_point
 
 
 class zh_net(nn.Module):
@@ -176,6 +176,8 @@ class decoder_block(nn.Module):
 
         self.de_block3 = DWConv(out_channels, out_channels)
 
+        self.sigmoid = nn.Sigmoid()
+
         self.de_block4 = nn.Conv2d(out_channels, 1, 1)
 
         # 上采样
@@ -196,8 +198,8 @@ class decoder_block(nn.Module):
         # Elemeny-wise sum
         x = x + x0
         # 1*1卷积 al为Deep Supervision Flow( DS )用于辅助反向传播
-        #  todo 图中并没有标注要进行1*1卷积进行通道的变换,
-        al = self.de_block4(x)
+        #  这里加一个sigmoid和paper上一样构成了一个DS
+        al = self.sigmoid(self.de_block4(x))
         # 上采样
         result = self.de_block5(x)
         # print("al:{}".format(al.shape))
@@ -404,27 +406,40 @@ class ManageAltoDS(nn.Module):
         return al1, al2, al3, al4, result, seg
 
 
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+
 if __name__ == '__main__':
-    root_dir = "../HRCUS-CD/train"
-    children_dir = "A"
-    my_dataset = MyDataSet(root_dir, children_dir)
-    train_data_size = len(my_dataset)
-    train_data_loader = DataLoader(my_dataset, batch_size=24, shuffle=False, num_workers=2, drop_last=False)
+    root_dir = "../HRCUS-CD"
+    children_dir = "train"
+    train_dataset = MyDataSet(root_dir, children_dir)
+    train_data_size = len(train_dataset)
+    train_data_loader = DataLoader(train_dataset, batch_size=24, shuffle=False, num_workers=0, drop_last=True)
+
+    children_dir_test = "test"
+    test_dataset = MyDataSet(root_dir, children_dir_test)
+    test_data_size = len(test_dataset)
+    test_dataloader = DataLoader(test_dataset, batch_size=24, shuffle=False, num_workers=0, drop_last=True)
+
     model = zh_net()
+    model = model.to(device)
     manageAltoDS = ManageAltoDS()
+    manageAltoDS = manageAltoDS.to(device)
     loss_fun = SelfAdaptiveWeightedBCE()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=5e-4)
 
     total_train_step = 0
     total_test_step = 0
     epoch = 125
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, 4, 2, eta_min=1e-6, last_epoch=-1)
 
     for i in range(epoch):
         print("----------------------第 {} 轮训练开始----------------------".format(i + 1))
 
         model.train()
+        iters = len(train_data_loader)
         for data in train_data_loader:
             img_A, img_B, targets = data
+            img_A, img_B, targets = img_A.to(device), img_B.to(device), targets.to(device)
             output = model(img_A, img_B)
             # 用来处理al(ADBi) 1-4 生成 DS 1-4 用于辅助反向传播
             output = manageAltoDS(output)
@@ -441,7 +456,68 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             lossTotal.backward()
             optimizer.step()
+            scheduler.step()
+            # scheduler.step(epoch + i / iters)
 
             total_train_step += 1
             if total_train_step % 100 == 0:
                 print("训练次数:{},Loss:{}".format(total_train_step, lossTotal.item()))
+
+        # 测试
+        model.eval()
+        total_test_loss = 0
+        total_P = 0
+        total_R = 0
+        total_F1 = 0
+        total_OA = 0
+        total_O_IoU = 0
+        total_I_IoU = 0
+        total_mIoU = 0
+        with torch.no_grad():
+            for data in test_dataloader:
+                img_A, img_B, targets = data
+                img_A, img_B, targets = img_A.to(device), img_B.to(device), targets.to(device)
+                output = model(img_A, img_B)
+                # 用来处理al(ADBi) 1-4 生成 DS 1-4 用于辅助反向传播
+                output = manageAltoDS(output)
+                al1, al2, al3, al4, result, seg = output
+                # 计算loss1 loss2 loss3 loss4 loss5(result) lossTotal
+                loss1 = loss_fun(al1, targets)
+                loss2 = loss_fun(al2, targets)
+                loss3 = loss_fun(al3, targets)
+                loss4 = loss_fun(al4, targets)
+                loss5 = loss_fun(result, targets)
+                lossTotal = loss1 + loss2 + loss3 + loss4 + loss5
+
+                total_test_loss += lossTotal.item()
+                # 计算每张图片的精确度
+                pred = torch.where(torch.sigmoid(result) > 0.5, 1, 0)
+                TP, FP, TN, FN = calculate_point(pred, targets)
+                P_accuracy = TP / (TP + FP)
+                R_accuracy = TP / (TP + FN)
+                F1_accuracy = 2 * P_accuracy * R_accuracy / (P_accuracy + R_accuracy)
+                OA_accuracy = (TP + TN) / (TP + TN + FP + FN)
+                # intersection over union (IoU) values of negative samples and positive samples
+                O_IoU = TN / (TN + FN + FP)
+                I_IoU = TN / (TN + FP + FN)
+                mIoU = (O_IoU + I_IoU) / 2
+                total_P += P_accuracy
+                total_R += R_accuracy
+                total_F1 += F1_accuracy
+                total_OA += OA_accuracy
+                total_O_IoU += O_IoU
+                total_I_IoU += I_IoU
+                total_mIoU += mIoU
+        print("整体测试集上的Loss: {}".format(total_test_loss))
+        print("整体测试集上的P: {}".format(total_P / test_data_size))
+        print("整体测试集上的R: {}".format(total_R / test_data_size))
+        print("整体测试集上的F1: {}".format(total_F1 / test_data_size))
+        print("整体测试集上的OA: {}".format(total_OA / test_data_size))
+        print("整体测试集上的O_IoU: {}".format(total_O_IoU / test_data_size))
+        print("整体测试集上的I_IoU: {}".format(total_I_IoU / test_data_size))
+        print("整体测试集上的mIoU: {}".format(total_mIoU / test_data_size))
+
+        total_test_step += 1
+
+        torch.save(model, "../weights/AERNet_{}".format(i))
+        print("模型已保存")
